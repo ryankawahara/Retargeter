@@ -3,19 +3,15 @@
 This software is provided 'as-is', without any express or implied
 warranty.  In no event will the authors be held liable for any damages
 arising from the use of this software.
-
 Permission is granted to anyone to use this software for any purpose,
 including commercial applications, and to alter it and redistribute it
 freely, subject to the following restrictions:
-
 1. The origin of this software must not be misrepresented; you must not
    claim that you wrote the original software. If you use this software
    in a product, an acknowledgment in the product documentation would be
    appreciated but is not required.
-
 2. Altered source versions must be plainly marked as such, and must not be
    misrepresented as being the original software.
-
 Author:
 eduardo.simioni@gmail.com
 http://www.eksod.com
@@ -42,7 +38,7 @@ from pyfbsdk import *
 # This script is executed when a template with the script name ((in Asset\Character)) is dragged on a character.
 # It will Characterize a 3DS Max Biped so it fits the MoBu naming.
 #
-# Topic: FBFindModelByName,FBCharacter.SetCharacterizeOn,FBProgress
+# Topic: FBFindModelByLabelName,FBCharacter.SetCharacterizeOn,FBProgress
 #
 
 
@@ -264,8 +260,100 @@ mobuMap = {'Reference' : 'reference',
              'RightArmRoll' : 'RightArmRoll',
              'RightForeArmRoll' : 'RightForeArmRoll' }
 
+def check_if_first_frame_tpose(parentModel):
+    cursor = FBPlayerControl()
+    cursor.GotoStart()
+
+    # Get model children
+    children = parentModel.Children
+
+    if parentModel.Rotation is not FBVector3d(0,0,0):
+        return False
+
+    # if parent model is named Hips, need to rename with a PREFIX
+
+    # Check if any children exist
+    if (len(children) != 0):
+        # Loop through the children
+        for child in children:
+            print((type(child), child))
+            print(child.Rotation)
+            # if rotation is not 0, ask if should proceed
+            if child.Rotation is not FBVector3d(0,0,0):
+                return False
+
+            # Get any children
+            check_if_first_frame_tpose(child)
+
+    return True
+
+
+def add_prefix(parentModel):
+    cursor = FBPlayerControl()
+    cursor.GotoStart()
+
+    # Get model children
+    children = parentModel.Children
+
+    if parentModel.Name is "Hips":
+        return False
+
+    # if parent model is named Hips, need to rename with a PREFIX
+
+    # Check if any children exist
+    if (len(children) != 0):
+        # Loop through the children
+        for child in children:
+            print((type(child), child))
+            print(child.Name)
+            if child.Name == (child.Name + " 1"):
+                child.Name = "pre_" + child.Name
+
+            print(child.Name)
+            # Get any children
+            add_prefix(child)
+
+    return True
+
+
+def tpose_first_frame (parentModel, selectParent = True):
+
+    cursor = FBPlayerControl()
+    cursor.GotoStart()
+
+    # Get model children
+    print(parentModel.Name)
+    children = parentModel.Children
+    # if parent model is named Hips, need to rename with a PREFIX
+
+    # Check if any children exist
+    if (len (children) != 0):
+        # Loop through the children
+        for child in children:
+            print((type(child),child))
+            print(child.Rotation)
+            # if rotation is not 0, ask if should proceed
+
+            child.Rotation = FBVector3d(0,0,0)
+            child.Rotation.SetAnimated(True)
+            child.Rotation.GetAnimationNode().KeyAdd(FBTime(0,0,0,0), [0, 0, 0])
+            # Select the child
+            child.Selected = True
+            
+            # Get any children
+            tpose_first_frame (child)
+    
+    # Select parent
+    parentModel.Selected = selectParent
+    parentModel.Rotation = FBVector3d(0,0,0)
+    parentModel.Rotation.SetAnimated(True)
+    parentModel.Rotation.GetAnimationNode().KeyAdd(FBTime(0,0,0,0), [0, 0, 0])
+    
+    # Return status
+    return True
+
 def addJointToCharacter ( characterObject, slot, jointName ):    
-    myJoint = FBFindModelByName(jointName)
+    myJoint = FBFindModelByLabelName(jointName)
     if myJoint:
         proplist = characterObject.PropertyList.Find(slot + "Link")    
         proplist.append (myJoint)
@@ -306,7 +394,7 @@ def CharacterizeBiped(rootname, useBipedPrefixNamingScheme, nameprefix, boneMap,
     progresssteps = len(boneMap)
 
     # assign Biped to Character Mapping.
-    for pslot, pjointName in boneMap.iteritems():
+    for pslot, pjointName in boneMap.items():
         if not pjointName:
             addJointToCharacter (myBiped, pslot, namespace + rootname)
         else:
@@ -316,7 +404,7 @@ def CharacterizeBiped(rootname, useBipedPrefixNamingScheme, nameprefix, boneMap,
         fbp.Percent = int(val)
                 
     switchOn = myBiped.SetCharacterizeOn( True )    
-    print "Character mapping created for " + (myBiped.LongName)
+    print("Character mapping created for " + (myBiped.LongName))
         
     # We must call FBDelete when the FBProgress object is no longer needed.
     fbp.FBDelete()
@@ -374,7 +462,26 @@ def main():
         FBMessageBox( "Selection canceled", "Character selection canceled.", "OK", None, None )
         return False
 
-    # asking which file format to load. ".fbx" might have a character on the scene.        
+    # choose where to save retargeted
+    retarget_dest = newCharPopup.Path
+    retarget_dest_choose = FBFolderPopup()
+    retarget_dest_choose.Caption = "Where to save retargeted animations"
+    retarget_dest_choose.Path = newCharPopup.Path # easier to navigate
+
+    if retarget_dest_choose.Execute():
+        retarget_dest = retarget_dest_choose.Path
+    else:
+        FBMessageBox( "Retarget selection canceled", "", "OK", None, None )
+        return False
+    try:
+        os.mkdir(os.path.join(retarget_dest, "Retargeted"))
+    except FileExistsError:
+        overwrite = FBMessageBox("Overwrite", "Retarget folder already exists, overwrite?", "Yes", "Cancel")
+        if overwrite == 0:
+            return False
+        os.makedirs(os.path.join(retarget_dest, "Retargeted"), exist_ok = True)
+
+    # asking which file format to load. ".fbx" might have a character on the scene.
     fileFormatMBox = FBMessageBox( "What format to load", "In which file format are the animations?", ".fbx" , ".bvh", "Cancel" )
     if fileFormatMBox == 1:
         fileFormat = ".fbx"
@@ -444,9 +551,11 @@ def main():
             # setup load/merge options
             lOptions = FBFbxOptions(True) # true = load options
             lOptions.CustomImportNamespace = "merged"
-            app.FileMerge(oldAnimsPopup.Path + "\\" + animName, False, lOptions)
+            # app.FileMerge(oldAnimsPopup.Path + "\\" + animName, False, lOptions)
+            app.FileMerge(os.path.join(oldAnimsPopup.Path, animName), False, lOptions)
         else:
-            app.FileImport(oldAnimsPopup.Path + "\\" + animName, False) # False means it will create objects regardless
+            # app.FileImport(oldAnimsPopup.Path + "\\" + animName, False) # False means it will create objects regardless
+            app.FileImport(os.path.join(oldAnimsPopup.Path, animName), False) # False means it will create objects regardless
 
 
         # if there's no character in the merged animation scene we need to characterize it
@@ -455,21 +564,25 @@ def main():
             # find root model to pass to CharacterizeBiped()
             # if merging FBX, it has custom namespace
             if fileFormat == ".fbx":
-                oldAnimRoot = FBFindModelByName("merged:" + prefix[1] + userRoot[1])
+                oldAnimRoot = FBFindModelByLabelName(prefix[1] + userRoot[1])
             # if importing BVH, it will have it's own BVH: namespace
             else:
-                oldAnimRoot = FBFindModelByName("BVH:" + prefix[1] + userRoot[1])
+                oldAnimRoot = FBFindModelByLabelName("BVH:" + prefix[1] + userRoot[1])
                 
             if not oldAnimRoot:
                 FBMessageBox( "Could not find hips object", "Check opened scene. Root node name must be given without namespace.", "OK", None, None )
                 return False
 
+            print(check_if_first_frame_tpose(oldAnimRoot))
+            # add_prefix(oldAnimRoot)
+            tpose_first_frame(oldAnimRoot)
             # characterize imported animation with modified 3dsmaxbipedtemplate.py
             oldAnimChar = CharacterizeBiped(userRoot[1], bipedPrefixNamingScheme, prefix[1], boneMap, oldAnimRoot)
             
         else:
             # merged FBX with an character present in the scene
             oldAnimChar = scene.Characters[1]
+            
 
         # plot
         charToSave = plotAnim(newChar, oldAnimChar)
@@ -483,10 +596,19 @@ def main():
         sOptions.ShowOptionsDialog = False
         
         # Saves out the character and rig animation
-        app.SaveCharacterRigAndAnimation(newCharPopup.Path + "\\" + animName, charToSave, sOptions)
+        # app.SaveCharacterRigAndAnimation(newCharPopup.Path + "\\" + animName, charToSave, sOptions)
+
+        # should be save as
+
+        app.FileSave(os.path.join(retarget_dest, "Retargeted", animName), sOptions)
+        # app.SaveCharacterRigAndAnimation(os.path.join(retarget_dest, "Retargeted", animName), charToSave, sOptions)
+
         if fileFormat != ".fbx":
             animName += ".fbx" # leaving .bvh and adding .fbx, so File saved: is printed correctly
-        print "File saved: " + newCharPopup.Path + "\\" + animName
+        # print("File saved: " + newCharPopup.Path + "\\" + animName)
+        print("File saved: " + os.path.join(retarget_dest, "Retargeted", animName))
+
+        return
 
 
 main()
